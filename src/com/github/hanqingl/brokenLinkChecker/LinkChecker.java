@@ -1,10 +1,8 @@
 package com.github.hanqingl.brokenLinkChecker;
 
-import java.io.BufferedReader;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.Reader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -16,10 +14,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 public class LinkChecker {
-    private interface OnLinkCheckCompletedListener {
-        void linkCheckCompleted(String[] subLinks);
-    }
-
     private final ExecutorService pool;
     private static final int DEFAULT_POOL_SIZE = 50;
 
@@ -46,10 +40,9 @@ public class LinkChecker {
         public void run() {
             try {
                 String content = getFileContent(filePath);
+                // System.out.println("File " + filePath + " checked");
 
-                System.out.println("File " + filePath + " checked");
-
-                String[] linkURLs = extractLinkURL(content);
+                List<String> linkURLs = extractLinkURL(content);
 
                 int index = filePath.lastIndexOf('/');
                 String parentDir = filePath.substring(0, index + 1);
@@ -57,43 +50,34 @@ public class LinkChecker {
                 for (String url : linkURLs) {
                     pool.execute(new LinkCheckerHandler(parentDir + url));
                 }
-            } catch (FileNotFoundException e) {
-                System.err.println("checking " + filePath);
+            } catch (IOException e) {
+                System.err.println("Broken Link: " + filePath);
                 // throw new BrokenLinkException("File " + filePath + " not found");
             }
         }
 
     }
 
-    private String getFileContent(String fileName) throws FileNotFoundException {
-        StringBuilder sb = new StringBuilder();
-        Reader reader = null;
-        reader = new FileReader(fileName);
-
-        BufferedReader br = new BufferedReader(reader);
-
-        int c;
-        try {
-            while ((c = br.read()) != -1) {
-                sb.append((char) c);
-            }
-            br.close();
-        } catch (IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-
-        return sb.toString();
+    private String getFileContent(String fileName) throws IOException {
+        File file = new File(fileName);
+        FileInputStream fis = new FileInputStream(file);
+        byte[] b = new byte[(int) file.length()];
+        fis.read(b);
+        fis.close();
+        return new String(b);
     }
 
-    private String[] extractLinkURL(String content) {
+    private List<String> extractLinkURL(String content) {
         List<String> list = new ArrayList<String>();
         Document doc = Jsoup.parse(content);
         Elements categories = doc.select("a");
         for (Element category : categories) {
-            list.add(category.attr("href"));
+            String link = category.attr("href");
+            if (link.length() > 0 && !link.startsWith("#")) {
+                list.add(category.attr("href"));
+            }
         }
-        return list.toArray(new String[list.size()]);
+        return list;
     }
 
 }
