@@ -14,19 +14,53 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 public class LinkChecker {
-    private final ExecutorService pool;
+    private static final long HEART_BEET_RATE = 500;
     private static final int DEFAULT_POOL_SIZE = 50;
+    private final ExecutorService pool;
+    private boolean isActive;
 
+    /**
+     * Creates a LinkChecker with default number of threads (50)
+     */
     public LinkChecker() {
         this(DEFAULT_POOL_SIZE);
     }
 
-    public LinkChecker(int poolSize) {
-        pool = Executors.newFixedThreadPool(poolSize);
+    /**
+     * Creates a LinkChecker with at most nThreads
+     * 
+     * @param nThreads
+     *            the number of threads in the pool
+     * @throws IllegalArgumentException
+     *             if {@code nThreads <= 0}
+     */
+    public LinkChecker(int nThreads) {
+        pool = Executors.newFixedThreadPool(nThreads);
     }
 
+    /**
+     * Start checking links in a file. This method will also check
+     * all links in this file's linked files
+     * 
+     * @param filePath
+     *            root file path
+     */
     public void checkLinks(String filePath) {
+        setIsActive(true);
         pool.execute(new LinkCheckerHandler(filePath));
+
+        while (isActive()) {
+            setIsActive(false);
+            try {
+                Thread.sleep(HEART_BEET_RATE);
+            } catch (InterruptedException e) {
+                System.err.println("main thread interrupted");
+                pool.shutdown();
+                return;
+            }
+        }
+
+        pool.shutdown();
     }
 
     private class LinkCheckerHandler implements Runnable {
@@ -39,8 +73,8 @@ public class LinkChecker {
         @Override
         public void run() {
             try {
+                // System.out.println("Checking file " + filePath);
                 String content = getFileContent(filePath);
-                // System.out.println("File " + filePath + " checked");
 
                 List<String> linkURLs = extractLinkURL(content);
 
@@ -48,22 +82,44 @@ public class LinkChecker {
                 String parentDir = filePath.substring(0, index + 1);
 
                 for (String url : linkURLs) {
+                    setIsActive(true);
                     pool.execute(new LinkCheckerHandler(parentDir + url));
                 }
             } catch (IOException e) {
                 System.err.println("Broken Link: " + filePath);
                 // throw new BrokenLinkException("File " + filePath + " not found");
+                return;
             }
         }
 
     }
 
+    private synchronized boolean isActive() {
+        return isActive;
+    }
+
+    private synchronized void setIsActive(boolean isActive) {
+        this.isActive = isActive;
+    }
+
     private String getFileContent(String fileName) throws IOException {
         File file = new File(fileName);
+
+        long len = file.length();
+        if (len > Integer.MAX_VALUE) {
+            System.err.println("File " + fileName + " is too large, skip");
+            return "";
+        }
+
         FileInputStream fis = new FileInputStream(file);
-        byte[] b = new byte[(int) file.length()];
-        fis.read(b);
-        fis.close();
+        byte[] b = new byte[(int) len];
+        try {
+            fis.read(b);
+        }
+        finally {
+            if (fis != null)
+                fis.close();
+        }
         return new String(b);
     }
 
