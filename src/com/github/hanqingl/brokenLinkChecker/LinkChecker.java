@@ -14,10 +14,10 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 public class LinkChecker {
-    private static final long HEART_BEET_RATE = 500;
     private static final int DEFAULT_POOL_SIZE = 50;
     private final ExecutorService pool;
-    private boolean isActive;
+    private int totalTask = 0;
+    private int finishedTask = 0;
 
     /**
      * Creates a LinkChecker with default number of threads (50)
@@ -46,20 +46,20 @@ public class LinkChecker {
      *            root file path
      */
     public void checkLinks(String filePath) {
-        setIsActive(true);
+        increaseTotalTask();
         pool.execute(new LinkCheckerHandler(filePath));
 
-        while (isActive()) {
-            setIsActive(false);
+        synchronized (this) {
             try {
-                Thread.sleep(HEART_BEET_RATE);
+                // wait until a worker thread notify
+                // the main thread that all tasks are done
+                wait();
             } catch (InterruptedException e) {
                 System.err.println("main thread interrupted");
-                pool.shutdown();
-                return;
             }
         }
 
+        System.out.println("Total link checked: " + totalTask);
         pool.shutdown();
     }
 
@@ -79,27 +79,42 @@ public class LinkChecker {
                 List<String> linkURLs = extractLinkURL(content);
 
                 int index = filePath.lastIndexOf('/');
+                if (index == -1) {
+                    System.err.println("Bad file path (no '/' found)");
+                    return;
+                }
+
                 String parentDir = filePath.substring(0, index + 1);
 
                 for (String url : linkURLs) {
-                    setIsActive(true);
+                    increaseTotalTask();
                     pool.execute(new LinkCheckerHandler(parentDir + url));
                 }
             } catch (IOException e) {
                 System.err.println("Broken Link: " + filePath);
                 // throw new BrokenLinkException("File " + filePath + " not found");
-                return;
             }
+
+            increaseFinishedTask();
+            notifyIfDone();
         }
-
     }
 
-    private synchronized boolean isActive() {
-        return isActive;
+    private synchronized void increaseTotalTask() {
+        totalTask++;
     }
 
-    private synchronized void setIsActive(boolean isActive) {
-        this.isActive = isActive;
+    private synchronized void increaseFinishedTask() {
+        finishedTask++;
+    }
+
+    /**
+     * Notify the main thread which is waiting that all tasks are done
+     */
+    private synchronized void notifyIfDone() {
+        if (totalTask == finishedTask) {
+            notify();
+        }
     }
 
     private String getFileContent(String fileName) throws IOException {
@@ -117,8 +132,9 @@ public class LinkChecker {
             fis.read(b);
         }
         finally {
-            if (fis != null)
+            if (fis != null) {
                 fis.close();
+            }
         }
         return new String(b);
     }

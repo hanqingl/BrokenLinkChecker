@@ -1,0 +1,8 @@
+
+*.class
+
+.project
+
+.classpath
+
+lib/.DS_Store
